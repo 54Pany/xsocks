@@ -1,8 +1,6 @@
 ﻿#include "stdafx.h"
 #include "SocksMgr.h"
 
-#include "../thread/ThreadArray.h"
-
 CSocksMgr::CSocksMgr():
 	m_pwd("cs"),
 	m_user("cs"),
@@ -30,7 +28,7 @@ DWORD WINAPI CSocksMgr::TCP_S2C(void* lpParameter)
 			debugLog(_T("recv Error! %d"),WSAGetLastError());
 			break;
 		}
-		BOOL bRet = Socket::SendBuf(pSvcInfo->slocal,buffer,nCount);
+		bool bRet = Socket::SendBuf(pSvcInfo->slocal,buffer,nCount);
 
 		if (!bRet)
 		{
@@ -60,7 +58,7 @@ DWORD WINAPI CSocksMgr::TCP_C2S(void* lpParameter)
 			break;
 		}
 
-		BOOL bRet = Socket::SendBuf(pSvcInfo->sremote,buffer,nCount);
+		bool bRet = Socket::SendBuf(pSvcInfo->sremote,buffer,nCount);
 
 		if(!bRet)
 		{
@@ -80,32 +78,32 @@ DWORD WINAPI CSocksMgr::TCPTunnel( LPVOID lpParameter )
 
 DWORD WINAPI CSocksMgr::TCPTunnelProc( LPVOID lpParameter )
 {
-	SERVICE_INFO* pSvcInfo = (SERVICE_INFO*)lpParameter;
+	SERVICE_INFO* pSvc = (SERVICE_INFO*)lpParameter;
 
 	Thread t1 , t2;
 
-	t1.Start((LPTHREAD_START_ROUTINE)TCP_C2S,pSvcInfo);
-	t2.Start((LPTHREAD_START_ROUTINE)TCP_S2C, pSvcInfo);
+	t1.Start((LPTHREAD_START_ROUTINE)TCP_C2S,pSvc);
+	t2.Start((LPTHREAD_START_ROUTINE)TCP_S2C, pSvc);
 
 	t1.WaitForEnd();
 	t2.WaitForEnd();
 
 
 	debugLog(_T("Tunnel thread finish!"));
-	if (pSvcInfo)
+	if (pSvc)
 	{
-		free(pSvcInfo);
+		free(pSvc);
 	}
 
 	return TRUE;
 }
 
-BOOL CSocksMgr::Proxy( SOCKET s,LPSTR user , LPSTR pwd )
+bool CSocksMgr::Proxy( int s,LPSTR user , LPSTR pwd )
 {
 	SERVICE_INFO *pSvc = new SERVICE_INFO;
 	pSvc->socket = s;
 
-	BOOL ret = FALSE;
+	bool ret = FALSE;
 
 	do 
 	{
@@ -121,7 +119,9 @@ BOOL CSocksMgr::Proxy( SOCKET s,LPSTR user , LPSTR pwd )
 
 		if (pSvc->type == SOCKS_UDP)
 		{
-			ret = SocksParser::GetInstanceRef().UDPResponse(*pSvc);
+			//ret = SocksParser::GetInstanceRef().UDPResponse(*pSvc);
+			ret = FALSE;
+			break;
 		}
 		else
 		{
@@ -130,8 +130,10 @@ BOOL CSocksMgr::Proxy( SOCKET s,LPSTR user , LPSTR pwd )
 			if ( ! ret )
 				break;
 
+			Thread t;
+
 			//进入纯转发模式
-			ret = m_threadList.AddThreadTask((LPTHREAD_START_ROUTINE)TCPTunnel,pSvc);
+			ret = t.Start((LPTHREAD_START_ROUTINE)TCPTunnel,pSvc);
 		}
 
 	} while (FALSE);
@@ -153,9 +155,9 @@ DWORD WINAPI CSocksMgr::Forward(void* lpParameter)
 
 DWORD WINAPI CSocksMgr::ForwardProc(void* lpParameter)
 {
-	SOCKET s = (SOCKET)lpParameter;
+	int s = (int)lpParameter;
 
-	BOOL ret = Proxy(s,(LPSTR)m_user.c_str(),(LPSTR)m_pwd.c_str());
+	bool ret = Proxy(s,(LPSTR)m_user.c_str(),(LPSTR)m_pwd.c_str());
 
 	if ( !ret )
 		Socket::Close(s);
@@ -172,10 +174,10 @@ DWORD WINAPI CSocksMgr::RedirectProc( LPVOID lpParameter )
 {
 	PROXY_CONFIG* config = (PROXY_CONFIG*)lpParameter;
 
-	SOCKET slocal = Socket::Create();
-	SOCKET sremote = Socket::Create();
+	int slocal = Socket::Create();
+	int sremote = Socket::Create();
 
-	BOOL ret = FALSE;
+	bool ret = FALSE;
 
 	do 
 	{
@@ -195,8 +197,10 @@ DWORD WINAPI CSocksMgr::RedirectProc( LPVOID lpParameter )
 		pSvc->slocal = slocal;
 		pSvc->sremote = sremote;
 
+		Thread t;
+
 		//进入纯转发模式
-		ret = m_threadList.AddThreadTask((LPTHREAD_START_ROUTINE)TCPTunnel,pSvc);
+		ret = t.Start((LPTHREAD_START_ROUTINE)TCPTunnel,pSvc);
 
 	} while (FALSE);
 
@@ -216,9 +220,9 @@ DWORD WINAPI CSocksMgr::Reverse(void* lpParameter)
 DWORD WINAPI CSocksMgr::ReverseProc(void* lpParameter)
 {
 	PROXY_CONFIG* config = (PROXY_CONFIG*)lpParameter;
-	SOCKET s = Socket::Create();
+	int s = Socket::Create();
 
-	BOOL ret = FALSE;
+	bool ret = FALSE;
 
 	do 
 	{
@@ -247,12 +251,12 @@ DWORD WINAPI CSocksMgr::ReverseProc(void* lpParameter)
 }
 
 
-BOOL CSocksMgr::Begin( LPCSTR ip1, int port1,LPCSTR ip2,int port2)
+bool CSocksMgr::Begin( LPCSTR ip1, int port1,LPCSTR ip2,int port2)
 {
 	m_rIp = ip2;
 	m_rPort = port2;
 
-	SOCKET s = Socket::Create();
+	int s = Socket::Create();
 
 	if (s == SOCKET_ERROR)
 		return 0;
@@ -268,7 +272,7 @@ BOOL CSocksMgr::Begin( LPCSTR ip1, int port1,LPCSTR ip2,int port2)
 	infoLog(_T("Connect Success!"));
 
 
-	BOOL ret = FALSE;
+	bool ret = FALSE;
 	PROXY_CONFIG* proxy = new PROXY_CONFIG;
 
 	do
@@ -282,8 +286,10 @@ BOOL CSocksMgr::Begin( LPCSTR ip1, int port1,LPCSTR ip2,int port2)
 		strncpy(proxy->user,m_user.c_str(),20);
 		strncpy(proxy->pwd,m_pwd.c_str(),20);
 
+		Thread t;
+
 		proxy->lpParameter = (uint32_t)this;
-		m_threadList.AddThreadTask((LPTHREAD_START_ROUTINE)Redirect,proxy);
+		t.Start((LPTHREAD_START_ROUTINE)Redirect,proxy);
 
 		proxy = new PROXY_CONFIG;
 
@@ -294,9 +300,9 @@ BOOL CSocksMgr::Begin( LPCSTR ip1, int port1,LPCSTR ip2,int port2)
 	return ret;
 }
 
-BOOL CSocksMgr::Begin( LPCSTR ip, int port )
+bool CSocksMgr::Begin( LPCSTR ip, int port )
 {
-	SOCKET s = Socket::Create();
+	int s = Socket::Create();
 
 	if (s == SOCKET_ERROR)
 		return 0;
@@ -311,7 +317,7 @@ BOOL CSocksMgr::Begin( LPCSTR ip, int port )
 
 	infoLog(_T("Connect Success!"));
 
-	BOOL ret = FALSE;
+	bool ret = FALSE;
 	PROXY_CONFIG* proxy = new PROXY_CONFIG;
 
 	do
@@ -325,8 +331,10 @@ BOOL CSocksMgr::Begin( LPCSTR ip, int port )
 		strncpy(proxy->user,m_user.c_str(),20);
 		strncpy(proxy->pwd,m_pwd.c_str(),20);
 
+		Thread t;
+
 		proxy->lpParameter = (uint32_t)this;
-		m_threadList.AddThreadTask((LPTHREAD_START_ROUTINE)Reverse,proxy);
+		t.Start((LPTHREAD_START_ROUTINE)Reverse,proxy);
 
 		proxy = new PROXY_CONFIG;
 
@@ -337,14 +345,16 @@ BOOL CSocksMgr::Begin( LPCSTR ip, int port )
 	return ret;
 }
 
-BOOL CSocksMgr::Begin( int port )
+bool CSocksMgr::Begin( int port )
 {
-	SOCKET s = Socket::Create();
+	int s = Socket::Create();
+
+
 
 	if (s == SOCKET_ERROR)
 		return 0;
 
-	BOOL ret = FALSE;
+	bool ret = FALSE;
 	do 
 	{
 		
@@ -360,7 +370,7 @@ BOOL CSocksMgr::Begin( int port )
 
 		while (TRUE)
 		{
-			SOCKET rs = Socket::Accept(s,(sockaddr*)&raddr);
+			int rs = Socket::Accept(s,(sockaddr*)&raddr);
 
 			if (rs == SOCKET_ERROR)
 			{
@@ -371,7 +381,9 @@ BOOL CSocksMgr::Begin( int port )
 
 			infoLog(_T("Accept : %s"),a2t(inet_ntoa(raddr.sin_addr)));
 			
-			m_threadList.AddThreadTask((LPTHREAD_START_ROUTINE)Forward,(void*)rs);
+			Thread t;
+
+			t.Start((LPTHREAD_START_ROUTINE)Forward,(void*)rs);
 		}
 
 
